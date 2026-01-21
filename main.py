@@ -4,7 +4,8 @@ from google import genai
 from google.genai import types
 import argparse
 from prompts import system_prompt
-from functions.call_function import available_functions
+from call_function import available_functions, call_function
+
 
 def main():
     load_dotenv()
@@ -22,12 +23,12 @@ def main():
 
     messages = [types.Content(role="user", parts=[types.Part(text=args.user_prompt)])]
     response = client.models.generate_content(
-        model='gemini-2.5-flash', 
-        contents=messages, 
+        model="gemini-2.5-flash",
+        contents=messages,
         config=types.GenerateContentConfig(
             tools=[available_functions],
             system_instruction=system_prompt,
-            ),
+        ),
     )
 
     if response.usage_metadata is None:
@@ -35,13 +36,27 @@ def main():
 
     if args.verbose:
         print("User prompt: ", args.user_prompt)
-        print(f"Prompt tokens: {response.usage_metadata.prompt_token_count}\nResponse tokens: {response.usage_metadata.candidates_token_count}")
+        print(
+            f"Prompt tokens: {response.usage_metadata.prompt_token_count}\nResponse tokens: {response.usage_metadata.candidates_token_count}"
+        )
 
-    if response.function_calls is not None and len(response.function_calls) > 0:
-        for func_call in response.function_calls:
-            print(f"Calling function: {func_call.name}({func_call.args})")
-    else:
-        print(response.text)
+    if not response.function_calls:
+        print("Response: ", response.text)
+        return
+
+    function_results = []
+    for func_call in response.function_calls:
+        result = call_function(func_call, verbose=args.verbose)
+        if (
+            not result.parts
+            or not result.parts[0].function_response
+            or not result.parts[0].function_response.response
+        ):
+            raise RuntimeError(f"Empty function response for {func_call.name}")
+        function_results.append(result.parts[0])
+        if args.verbose:
+            print(f"-> {result.parts[0].function_response.response}")
+
 
 if __name__ == "__main__":
     main()
